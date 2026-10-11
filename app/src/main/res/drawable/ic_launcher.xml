@@ -1,0 +1,30 @@
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="96dp"
+    android:height="96dp"
+    android:viewportWidth="96"
+    android:viewportHeight="96">
+    <!-- Rounded squircle background -->
+    <path
+        android:fillColor="#4F46E5"
+        android:pathData="M24,4 C10.7,4 4,10.7 4,24 L4,72 C4,85.3 10.7,92 24,92 L72,92 C85.3,92 92,85.3 92,72 L92,24 C92,10.7 85.3,4 72,4 Z" />
+
+    <!-- Waveform sound bars in background -->
+    <path
+        android:fillColor="#38BDF8"
+        android:pathData="M16,42 L20,42 L20,54 L16,54 Z M24,34 L28,34 L28,62 L24,62 Z M32,24 L36,24 L36,72 L32,72 Z M40,32 L44,32 L44,64 L40,64 Z M48,38 L52,38 L52,58 L48,58 Z M56,28 L60,28 L60,68 L56,68 Z M64,36 L68,36 L68,60 L64,60 Z M72,40 L76,40 L76,56 L72,56 Z M80,44 L84,44 L84,52 L80,52 Z" />
+
+    <!-- Scissors Top Blade & Handle Loop -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M30,30 C30,24.48 25.52,20 20,20 C14.48,20 10,24.48 10,30 C10,35.52 14.48,40 20,40 C21.6,40 23.1,39.6 24.4,38.9 L44,48 L76,28 L72,24 L45,43 L27.8,25.8 C28.5,24.5 29,23.3 29,22 M20,24 C23.3,24 26,26.7 26,30 C26,33.3 23.3,36 20,36 C16.7,36 14,33.3 14,30 C14,26.7 16.7,24 20,24 Z" />
+
+    <!-- Scissors Bottom Blade & Handle Loop -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M30,66 C30,60.48 25.52,56 20,56 C14.48,56 10,60.48 10,66 C10,71.52 14.48,76 20,76 C25.52,76 30,71.52 30,66 M20,60 C23.3,60 26,62.7 26,66 C26,69.3 23.3,72 20,72 C16.7,72 14,69.3 14,66 C14,62.7 16.7,60 20,60 Z M25,62 L45,51 L72,72 L76,68 L44,48 L25.5,58.5 Z" />
+
+    <!-- Scissor Center Pivot Pin -->
+    <path
+        android:fillColor="#F43F5E"
+        android:pathData="M48,48 m-4,0 a4,4 0 1,0 8,0 a4,4 0 1,0 -8,0" />
+</vector>
