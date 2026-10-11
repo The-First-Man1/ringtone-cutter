@@ -891,7 +891,7 @@
       <input type="file" id="apiKeyFileInput" accept=".txt,text/plain" style="display:none;">
     </div>
     <label class="toggle" id="apiKeyPersistRow" style="display:none;">
-      <input type="checkbox" id="apiKeyPersistChk"> 💾 שמור את המפתח במחשב (נשאר גם אחרי סגירת התוכנה)
+      <input type="checkbox" id="apiKeyPersistChk"> 💾 שמור את המפתח בטלפון (נשאר גם אחרי סגירת האפליקציה)
     </label>
     <div class="ai-status" id="aiStatus">לא מחובר</div>
 
@@ -3066,7 +3066,7 @@ document.addEventListener('DOMContentLoaded', ()=>{
     markKeySaved();
     if(hasDesktopKeyStorage && apiKeyPersistChk.checked){
       window.desktopSaveApiKey(val).then(()=>logLine('מפתח API נשמר לשמירה קבועה בתוכנה.')).catch(()=>{});
-      aiStatus.textContent = 'מחובר ל-Gemini — המפתח נשמר במחשב (נשאר גם אחרי סגירה)';
+      aiStatus.textContent = 'מחובר ל-Gemini — המפתח נשמר בטלפון (נשאר גם אחרי סגירה)';
     } else {
       aiStatus.textContent = 'מחובר ל-Gemini — המפתח בזיכרון הדף בלבד';
     }
