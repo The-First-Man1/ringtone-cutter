@@ -809,111 +809,212 @@
         }
 
         // Smart Chorus Peak Detection Algorithm
+        // Uses a prefix sum over down-sampled energy points so overlapping 25s windows
+        // are evaluated in O(n) instead of repeatedly scanning the same samples.
         function smartChorusDetect() {
-            if (!audioBuffer) return;
-            showLoader(true, "מזהה את נקודת השיא והפזמון...");
+            if (!audioBuffer || !duration) return;
+            showLoader(true, "מנתח את השמע למציאת הקטע החזק...");
 
             setTimeout(() => {
-                const data = audioBuffer.getChannelData(0);
-                const sampleRate = audioBuffer.sampleRate;
-                const windowSize = Math.floor(sampleRate * 25); // 25s window
-                const step = Math.floor(sampleRate * 0.5); // 0.5s step
+                try {
+                    const data = audioBuffer.getChannelData(0);
+                    const sampleRate = audioBuffer.sampleRate;
+                    const stride = 64;
+                    const pointCount = Math.ceil(data.length / stride);
+                    const prefixEnergy = new Float64Array(pointCount + 1);
 
-                let bestWindowStart = 0;
-                let maxEnergy = 0;
+                    for (let i = 0; i < pointCount; i++) {
+                        const sample = data[i * stride] || 0;
+                        prefixEnergy[i + 1] = prefixEnergy[i] + sample * sample;
+                    }
 
-                // Scan through track looking for highest RMS volume window
-                for (let i = 0; i < data.length - windowSize; i += step) {
-                    let sum = 0;
-                    const subStep = 64; // downsample for instant performance
-                    for (let j = 0; j < windowSize; j += subStep) {
-                        const val = data[i + j];
-                        sum += val * val;
+                    const windowSeconds = Math.min(25, duration);
+                    const windowPoints = Math.max(1, Math.floor(sampleRate * windowSeconds / stride));
+                    const stepPoints = Math.max(1, Math.floor(sampleRate * 0.5 / stride));
+                    const lastStart = Math.max(0, pointCount - windowPoints);
+                    let bestPoint = 0;
+                    let maxEnergy = -1;
+
+                    for (let start = 0; start <= lastStart; start += stepPoints) {
+                        const end = Math.min(pointCount, start + windowPoints);
+                        const count = Math.max(1, end - start);
+                        const energy = prefixEnergy[end] - prefixEnergy[start];
+                        const rms = Math.sqrt(energy / count);
+                        if (rms > maxEnergy) {
+                            maxEnergy = rms;
+                            bestPoint = start;
+                        }
                     }
-                    const rms = Math.sqrt(sum / (windowSize / subStep));
-                    if (rms > maxEnergy) {
-                        maxEnergy = rms;
-                        bestWindowStart = i / sampleRate;
-                    }
+
+                    startTime = Math.round((bestPoint * stride / sampleRate) * 10) / 10;
+                    startTime = Math.max(0, Math.min(Math.max(0, duration - 0.5), startTime));
+                    endTime = Math.min(duration, startTime + 30);
+                    updateTimeDisplays();
+                    showLoader(false);
+                    showToast("הקטע החזק זוהה!");
+                    playSelection();
+                } catch (err) {
+                    console.error("Smart audio analysis failed", err);
+                    showLoader(false);
+                    showToast("ניתוח השיר נכשל. אפשר לבחור קטע ידנית.");
                 }
-
-                startTime = Math.round(bestWindowStart * 10) / 10;
-                endTime = Math.min(duration, startTime + 30);
-                updateTimeDisplays();
-                showLoader(false);
-                showToast("הפזמון זוהה בהצלחה!");
-                playSelection();
-            }, 100);
+            }, 0);
         }
 
-        // Waveform Canvas Rendering
+        // Waveform rendering cache.
+        // The decoded samples are scanned only when a track or canvas size changes.
+        // Playback animation then composites cached canvases rather than rescanning audio.
         const canvas = document.getElementById('waveCanvas');
         const ctx = canvas.getContext('2d');
+        const waveformBaseCanvas = document.createElement('canvas');
+        const waveformSelectionCanvas = document.createElement('canvas');
+        const waveformCache = {
+            buffer: null,
+            width: 0,
+            height: 0,
+            mins: null,
+            maxs: null,
+            selectionStart: NaN,
+            selectionEnd: NaN,
+            selectionDuration: NaN
+        };
+        let resizeTimer = null;
 
         function resizeCanvas() {
             const rect = canvas.getBoundingClientRect();
-            canvas.width = rect.width * window.devicePixelRatio;
-            canvas.height = rect.height * window.devicePixelRatio;
+            // Capping DPR at 2 keeps the canvas crisp while avoiding excessive pixel work
+            // on high-density phones.
+            const dpr = Math.min(window.devicePixelRatio || 1, 2);
+            const nextWidth = Math.max(1, Math.round(rect.width * dpr));
+            const nextHeight = Math.max(1, Math.round(rect.height * dpr));
+
+            if (canvas.width !== nextWidth || canvas.height !== nextHeight) {
+                canvas.width = nextWidth;
+                canvas.height = nextHeight;
+                waveformCache.buffer = null;
+                waveformCache.selectionStart = NaN;
+                waveformCache.selectionEnd = NaN;
+            }
             drawWaveform();
         }
-        window.addEventListener('resize', resizeCanvas);
 
-        function drawWaveform() {
-            if (!audioBuffer || !canvas.width) return;
+        window.addEventListener('resize', function() {
+            clearTimeout(resizeTimer);
+            resizeTimer = setTimeout(resizeCanvas, 100);
+        });
+
+        function buildWaveformBase() {
+            if (!audioBuffer || !canvas.width || !canvas.height) return;
+
             const w = canvas.width;
             const h = canvas.height;
-            ctx.clearRect(0, 0, w, h);
+            waveformBaseCanvas.width = w;
+            waveformBaseCanvas.height = h;
+            waveformSelectionCanvas.width = w;
+            waveformSelectionCanvas.height = h;
+
+            const baseCtx = waveformBaseCanvas.getContext('2d');
+            baseCtx.clearRect(0, 0, w, h);
+            baseCtx.fillStyle = '#4338CA';
 
             const data = audioBuffer.getChannelData(0);
             const step = Math.ceil(data.length / w);
             const amp = h / 2;
+            const mins = new Float32Array(w);
+            const maxs = new Float32Array(w);
 
-            // Draw wave background bars
-            ctx.fillStyle = '#4338CA';
-            for (let i = 0; i < w; i++) {
-                let min = 1.0;
-                let max = -1.0;
-                for (let j = 0; j < step; j++) {
-                    const datum = data[(i * step) + j];
-                    if (datum < min) min = datum;
-                    if (datum > max) max = datum;
+            for (let x = 0; x < w; x++) {
+                const from = x * step;
+                const to = Math.min(data.length, from + step);
+                let min = 1;
+                let max = -1;
+
+                for (let j = from; j < to; j++) {
+                    const value = data[j];
+                    if (value < min) min = value;
+                    if (value > max) max = value;
                 }
+                if (from >= data.length) {
+                    min = 0;
+                    max = 0;
+                }
+
+                mins[x] = min;
+                maxs[x] = max;
                 const barHeight = Math.max(2, (max - min) * amp * 0.9);
-                ctx.fillRect(i, (h - barHeight) / 2, 1, barHeight);
+                baseCtx.fillRect(x, (h - barHeight) / 2, 1, barHeight);
             }
 
-            // Draw selection highlight overlay
-            const startX = (startTime / duration) * w;
-            const endX = (endTime / duration) * w;
+            waveformCache.buffer = audioBuffer;
+            waveformCache.width = w;
+            waveformCache.height = h;
+            waveformCache.mins = mins;
+            waveformCache.maxs = maxs;
+            waveformCache.selectionStart = NaN;
+            waveformCache.selectionEnd = NaN;
+            waveformCache.selectionDuration = NaN;
+        }
 
-            ctx.fillStyle = 'rgba(244, 63, 94, 0.25)';
-            ctx.fillRect(startX, 0, endX - startX, h);
+        function buildWaveformSelection() {
+            const w = canvas.width;
+            const h = canvas.height;
+            const startX = duration > 0 ? Math.max(0, Math.min(w, (startTime / duration) * w)) : 0;
+            const endX = duration > 0 ? Math.max(startX, Math.min(w, (endTime / duration) * w)) : 0;
 
-            // Redraw selected bars with vibrant color
-            ctx.fillStyle = '#F43F5E';
-            const selStartIdx = Math.floor(startX);
-            const selEndIdx = Math.ceil(endX);
-            for (let i = selStartIdx; i < selEndIdx; i++) {
-                let min = 1.0;
-                let max = -1.0;
-                for (let j = 0; j < step; j++) {
-                    const datum = data[(i * step) + j];
-                    if (datum < min) min = datum;
-                    if (datum > max) max = datum;
-                }
-                const barHeight = Math.max(2, (max - min) * amp * 0.9);
-                ctx.fillRect(i, (h - barHeight) / 2, 1, barHeight);
+            if (waveformCache.selectionStart === startX &&
+                waveformCache.selectionEnd === endX &&
+                waveformCache.selectionDuration === duration) {
+                return;
             }
 
-            // Draw Handles
+            const selectionCtx = waveformSelectionCanvas.getContext('2d');
+            selectionCtx.clearRect(0, 0, w, h);
+            selectionCtx.fillStyle = 'rgba(244, 63, 94, 0.25)';
+            selectionCtx.fillRect(startX, 0, endX - startX, h);
+            selectionCtx.fillStyle = '#F43F5E';
+
+            const first = Math.max(0, Math.floor(startX));
+            const last = Math.min(w, Math.ceil(endX));
+            const amp = h / 2;
+            for (let x = first; x < last; x++) {
+                const min = waveformCache.mins[x];
+                const max = waveformCache.maxs[x];
+                const barHeight = Math.max(2, (max - min) * amp * 0.9);
+                selectionCtx.fillRect(x, (h - barHeight) / 2, 1, barHeight);
+            }
+
+            waveformCache.selectionStart = startX;
+            waveformCache.selectionEnd = endX;
+            waveformCache.selectionDuration = duration;
+        }
+
+        function drawWaveform() {
+            if (!audioBuffer || !canvas.width || !canvas.height) return;
+
+            if (waveformCache.buffer !== audioBuffer ||
+                waveformCache.width !== canvas.width ||
+                waveformCache.height !== canvas.height ||
+                !waveformCache.mins || !waveformCache.maxs) {
+                buildWaveformBase();
+            }
+            if (!waveformCache.mins || !waveformCache.maxs) return;
+
+            buildWaveformSelection();
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            ctx.drawImage(waveformBaseCanvas, 0, 0);
+            ctx.drawImage(waveformSelectionCanvas, 0, 0);
+
+            const w = canvas.width;
+            const h = canvas.height;
+            const startX = duration > 0 ? (startTime / duration) * w : 0;
+            const endX = duration > 0 ? (endTime / duration) * w : 0;
             drawHandle(startX, '#FFFFFF', 'התחלה');
             drawHandle(endX, '#FFFFFF', 'סיום');
 
-            // Draw current playhead cursor if playing
             if (isPlaying) {
-                const elapsed = (audioCtx.currentTime - playbackStartTime);
+                const elapsed = audioCtx.currentTime - playbackStartTime;
                 const currentPos = playbackStartOffset + elapsed;
-                if (currentPos <= endTime) {
+                if (currentPos >= 0 && currentPos <= endTime) {
                     const curX = (currentPos / duration) * w;
                     ctx.fillStyle = '#FBBF24';
                     ctx.fillRect(curX - 1.5, 0, 3, h);
@@ -1074,13 +1175,16 @@
             animFrameId = requestAnimationFrame(animateCursor);
         }
 
-        // High Quality WAV Audio Encoder (Pure JS, Lossless, 100% Android compatible)
-        function renderCutAudioBlob() {
+        // High Quality WAV Audio Encoder (Pure JS, Lossless, Android compatible).
+        // Encoding is split into batches and yields to the UI thread so long exports do not
+        // freeze taps, scrolling, or the progress message on slower phones.
+        async function renderCutAudioBlob() {
             const sampleRate = audioBuffer.sampleRate;
             const channels = audioBuffer.numberOfChannels;
             const startSample = Math.floor(startTime * sampleRate);
             const endSample = Math.floor(endTime * sampleRate);
-            const totalSamples = endSample - startSample;
+            const totalSamples = Math.max(0, endSample - startSample);
+            if (!totalSamples) throw new Error('empty-selection');
 
             const fadeIn = parseFloat(document.getElementById('fadeInRange').value);
             const fadeOut = parseFloat(document.getElementById('fadeOutRange').value);
@@ -1088,8 +1192,6 @@
 
             const fadeInSamples = Math.floor(fadeIn * sampleRate);
             const fadeOutSamples = Math.floor(fadeOut * sampleRate);
-
-            // Create WAV 16-bit PCM buffer
             const byteLength = totalSamples * channels * 2 + 44;
             const outBuffer = new ArrayBuffer(byteLength);
             const view = new DataView(outBuffer);
@@ -1100,82 +1202,107 @@
                 }
             }
 
-            // RIFF header
             writeString(0, 'RIFF');
             view.setUint32(4, byteLength - 8, true);
             writeString(8, 'WAVE');
             writeString(12, 'fmt ');
-            view.setUint32(16, 16, true); // SubChunk1Size
-            view.setUint16(20, 1, true);  // AudioFormat (PCM)
+            view.setUint32(16, 16, true);
+            view.setUint16(20, 1, true);
             view.setUint16(22, channels, true);
             view.setUint32(24, sampleRate, true);
-            view.setUint32(28, sampleRate * channels * 2, true); // ByteRate
-            view.setUint16(32, channels * 2, true); // BlockAlign
-            view.setUint16(34, 16, true); // BitsPerSample
+            view.setUint32(28, sampleRate * channels * 2, true);
+            view.setUint16(32, channels * 2, true);
+            view.setUint16(34, 16, true);
             writeString(36, 'data');
             view.setUint32(40, totalSamples * channels * 2, true);
 
-            // Channel pointers
             const channelData = [];
             for (let c = 0; c < channels; c++) {
                 channelData.push(audioBuffer.getChannelData(c));
             }
 
             let offset = 44;
-            for (let i = 0; i < totalSamples; i++) {
-                // Calculate fade coefficient
-                let gain = boost;
-                if (fadeInSamples > 0 && i < fadeInSamples) {
-                    gain *= (i / fadeInSamples);
-                }
-                const remaining = totalSamples - i;
-                if (fadeOutSamples > 0 && remaining < fadeOutSamples) {
-                    gain *= (remaining / fadeOutSamples);
+            const chunkSize = 65536;
+            for (let chunkStart = 0; chunkStart < totalSamples; chunkStart += chunkSize) {
+                const chunkEnd = Math.min(totalSamples, chunkStart + chunkSize);
+                for (let i = chunkStart; i < chunkEnd; i++) {
+                    let gain = boost;
+                    if (fadeInSamples > 0 && i < fadeInSamples) {
+                        gain *= (i / fadeInSamples);
+                    }
+                    const remaining = totalSamples - i;
+                    if (fadeOutSamples > 0 && remaining < fadeOutSamples) {
+                        gain *= (remaining / fadeOutSamples);
+                    }
+
+                    for (let c = 0; c < channels; c++) {
+                        let sample = channelData[c][startSample + i] * gain;
+                        sample = Math.max(-1, Math.min(1, sample));
+                        const int16 = sample < 0 ? sample * 32768 : sample * 32767;
+                        view.setInt16(offset, int16, true);
+                        offset += 2;
+                    }
                 }
 
-                for (let c = 0; c < channels; c++) {
-                    let sample = channelData[c][startSample + i] * gain;
-                    // Clamp
-                    sample = Math.max(-1, Math.min(1, sample));
-                    const int16 = sample < 0 ? sample * 32768 : sample * 32767;
-                    view.setInt16(offset, int16, true);
-                    offset += 2;
+                if (chunkEnd < totalSamples) {
+                    const progress = Math.round((chunkEnd / totalSamples) * 100);
+                    showLoader(true, "יוצר את הרינגטון... " + progress + "%");
+                    await new Promise(resolve => setTimeout(resolve, 0));
                 }
             }
 
-            return new Blob([view], { type: 'audio/wav' });
+            return new Blob([outBuffer], { type: 'audio/wav' });
         }
 
         function exportRingtone() {
             if (!audioBuffer) return;
             stopPlayback();
+            showLoader(true, "מכין את הרינגטון...");
 
-            showLoader(true, "יוצר את הרינגטון...");
+            setTimeout(async () => {
+                try {
+                    const blob = await renderCutAudioBlob();
+                    const filename = originalFileName + "_ringtone.wav";
 
-            setTimeout(() => {
-                const blob = renderCutAudioBlob();
-                const filename = originalFileName + "_ringtone.wav";
-
-                if (window.AndroidBridge && typeof window.AndroidBridge.saveBlob === 'function') {
-                    const reader = new FileReader();
-                    reader.onloadend = function() {
-                        const base64 = reader.result.split(',')[1];
-                        window.AndroidBridge.saveBlob(base64, filename, 'audio/wav');
+                    if (window.AndroidBridge && typeof window.AndroidBridge.saveBlob === 'function') {
+                        const reader = new FileReader();
+                        reader.onloadend = function() {
+                            try {
+                                const result = String(reader.result || '');
+                                const base64 = result.split(',')[1];
+                                if (!base64) throw new Error('base64-conversion-failed');
+                                window.AndroidBridge.saveBlob(base64, filename, 'audio/wav');
+                                showLoader(false);
+                                showToast("הרינגטון מוכן — בחר מיקום לשמירה");
+                            } catch (err) {
+                                console.error("Unable to hand off audio file", err);
+                                showLoader(false);
+                                showToast("העברת הרינגטון לשמירה נכשלה");
+                            }
+                        };
+                        reader.onerror = function() {
+                            showLoader(false);
+                            showToast("קריאת קובץ הרינגטון נכשלה");
+                        };
+                        reader.readAsDataURL(blob);
+                    } else {
+                        const url = URL.createObjectURL(blob);
+                        const a = document.createElement('a');
+                        a.href = url;
+                        a.download = filename;
+                        document.body.appendChild(a);
+                        a.click();
+                        document.body.removeChild(a);
+                        setTimeout(() => URL.revokeObjectURL(url), 30000);
                         showLoader(false);
-                    };
-                    reader.readAsDataURL(blob);
-                } else {
-                    const url = URL.createObjectURL(blob);
-                    const a = document.createElement('a');
-                    a.href = url;
-                    a.download = filename;
-                    document.body.appendChild(a);
-                    a.click();
-                    document.body.removeChild(a);
+                        showToast("הרינגטון מוכן להורדה!");
+                    }
+                } catch (err) {
+                    console.error("Ringtone export failed", err);
                     showLoader(false);
-                    showToast("הרינגטון מוכן להורדה!");
+                    showToast("יצירת הרינגטון נכשלה. נסה קטע קצר יותר.");
                 }
-            }, 60);
+            }, 0);
         }
 
         // Modal for API Key
