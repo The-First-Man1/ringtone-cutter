@@ -733,10 +733,12 @@
                         startTime = 0;
                         endTime = Math.min(30, duration);
 
-                        updateTimeDisplays();
                         showLoader(false);
                         document.getElementById('editorCard').style.display = 'block';
-                        drawWaveform();
+                        // The editor is hidden before the first upload, so its canvas may have
+                        // zero width at startup. Resize after revealing it to avoid a 1px waveform.
+                        resizeCanvas();
+                        updateTimeDisplays();
                         showToast("השיר נטען בהצלחה!");
                     })
                     .catch(err => {
