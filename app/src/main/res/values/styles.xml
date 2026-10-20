@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <style name="Theme.RingtoneCutter" parent="Theme.AppCompat.Light.NoActionBar">
+    <style name="Theme.RingtoneCutter" parent="@android:style/Theme.Material.Light.NoActionBar">
         <item name="android:colorPrimary">#4F46E5</item>
         <item name="android:colorPrimaryDark">#3730A3</item>
         <item name="android:colorAccent">#F43F5E</item>
