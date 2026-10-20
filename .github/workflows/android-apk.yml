@@ -10,7 +10,7 @@ concurrency:
   cancel-in-progress: true
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   build:
@@ -37,20 +37,35 @@ jobs:
           import re
           from pathlib import Path
           html = Path("app/src/main/assets/app.html").read_text(encoding="utf-8")
-          scripts = re.findall(r"<script\b[^>]*>(.*?)</script>", html, flags=re.S | re.I)
+          scripts = re.findall(r"<script\\b[^>]*>(.*?)</script>", html, flags=re.S | re.I)
           if not scripts:
               raise SystemExit("No inline JavaScript found in app.html")
-          Path("/tmp/app-inline.js").write_text("\n".join(scripts), encoding="utf-8")
+          Path("/tmp/app-inline.js").write_text("\\n".join(scripts), encoding="utf-8")
           PY
           node --check /tmp/app-inline.js
 
       - name: Build debug APK
         run: gradle --no-daemon :app:assembleDebug
 
+      - name: Prepare direct-download APK
+        run: cp app/build/outputs/apk/debug/app-debug.apk ringtone-cutter.apk
+
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
           name: ringtone-cutter-debug-apk
-          path: app/build/outputs/apk/debug/*.apk
+          path: ringtone-cutter.apk
           if-no-files-found: error
           retention-days: 14
+
+      - name: Publish direct download release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v1.2.0
+          name: Ringtone Cutter v1.2.0
+          target_commitish: ${{ github.sha }}
+          files: ringtone-cutter.apk
+          fail_on_unmatched_files: true
+          make_latest: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
