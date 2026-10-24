@@ -44,11 +44,11 @@ jobs:
       - name: Publish direct download release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: v1.1.0-restored
-          name: Ringtone Cutter v1.1.0 — restored version
+          tag_name: v3.11-restored
+          name: חיתוך רינגטונים חכם V3.11 — גרסה משוחזרת
           target_commitish: ${{ github.sha }}
           files: ringtone-cutter.apk
           fail_on_unmatched_files: true
-          make_latest: false
+          make_latest: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
