@@ -6,7 +6,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   build:
@@ -30,10 +30,25 @@ jobs:
       - name: Build debug APK
         run: gradle --no-daemon :app:assembleDebug
 
-      - name: Upload APK
+      - name: Prepare APK for direct download
+        run: cp app/build/outputs/apk/debug/app-debug.apk ringtone-cutter.apk
+
+      - name: Upload APK artifact
         uses: actions/upload-artifact@v4
         with:
-          name: ringtone-cutter-debug-apk
-          path: app/build/outputs/apk/debug/*.apk
+          name: ringtone-cutter-restored-apk
+          path: ringtone-cutter.apk
           if-no-files-found: error
           retention-days: 14
+
+      - name: Publish direct download release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v1.1.0-restored
+          name: Ringtone Cutter v1.1.0 — restored version
+          target_commitish: ${{ github.sha }}
+          files: ringtone-cutter.apk
+          fail_on_unmatched_files: true
+          make_latest: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
